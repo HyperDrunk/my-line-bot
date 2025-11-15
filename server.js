@@ -4,8 +4,8 @@ const app = express();
 
 // إعدادات LINE - سنضع مفاتيحك هنا لاحقاً
 const config = {
-  channelAccessToken: 'YOUR_CHANNEL_ACCESS_TOKEN', // سنغير هذا
-  channelSecret: 'YOUR_CHANNEL_SECRET' // سنغير هذا
+  channelAccessToken: 'bGSRA/2mmH3ls9vhbhQ/fzCd0eS/9zXi67tnyTzdnEPG9eFfOz/dmnru4kCGoAqa1l1SKH3Pa56h0O40pQivTBiOVfTiIqYKc7fYL4cTMcuislx0OGqYFFmVuu4N4TfP6yK835erCoffxOZrQrDr4QdB04t89/1O/w1cDnyilFU=', // سنغير هذا
+  channelSecret: '73dcd76ba4de9810f67b6fffadcf8ef5' // سنغير هذا
 };
 
 const client = new line.Client(config);
