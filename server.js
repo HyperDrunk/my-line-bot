@@ -4,7 +4,7 @@ const app = express();
 
 // إعدادات LINE
 const config = {
-    channelAccessToken: '960BAZmmB3Dv0nHQyTcGmb6y2pX5kFtuyTzduH9f0b4ff0i/mmwMKGdubuL1S8U9Px96a06abqdjvTBJVFTlEqYtc7PTLAcTNcclsLm0GGgTTPhuwBHfTPayR23scrCdTFd0TryOnyGdBB4t89yJ3A4cDmyl3Fb+',
+    channelAccessToken: 'bGSRA/2mmH3ls9vhbhQ/fzCd0eS/9zXi67tnyTzdnEPG9eFfOz/dmnru4kCGoAqa1l1SKH3Pa56h0O40pQivTBiOVfTiIqYKc7fYL4cTMcuislx0OGqYFFmVuu4N4TfP6yK835erCoffxOZrQrDr4QdB04t89/1O/w1cDnyilFU=',
     channelSecret: '73dcd76ba4de9810f67b6fffadcf8ef5'
 };
 
