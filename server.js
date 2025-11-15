@@ -16,6 +16,8 @@ const securitySettings = {
   maxWarnings: 3
 };
 
+// 🔍 تخزين معلومات الأعضاء بالاسم
+const groupMembers = new Map();
 const userWarnings = new Map();
 
 app.use(express.json());
@@ -30,8 +32,35 @@ app.post('/webhook', (req, res) => {
 });
 
 function handleEvent(event) {
+  // 🔥 الحصول على معلومات العضو عند إرسال رسالة
+  if (event.type === 'message' && event.source.groupId) {
+    updateMemberProfile(event.source.userId, event.source.groupId);
+  }
+
   if (event.type === 'message' && event.message.type === 'text') {
     handleSmartMessage(event);
+  }
+}
+
+// 📝 تحديث معلومات العضو
+async function updateMemberProfile(userId, groupId) {
+  try {
+    const profile = await client.getGroupMemberProfile(groupId, userId);
+    
+    if (!groupMembers.has(groupId)) {
+      groupMembers.set(groupId, new Map());
+    }
+    
+    const members = groupMembers.get(groupId);
+    members.set(userId, {
+      userId: userId,
+      displayName: profile.displayName,
+      pictureUrl: profile.pictureUrl,
+      lastSeen: new Date()
+    });
+    
+  } catch (error) {
+    console.log('⚠️ لا يمكن الحصول على بروفايل العضو:', userId);
   }
 }
 
@@ -42,15 +71,20 @@ function handleSmartMessage(event) {
   const replyToken = event.replyToken;
   const isAdmin = securitySettings.admins.includes(userId);
 
-  // 🛡️ أوامر المشرفين مع المنشن
+  // 🛡️ أوامر المشرفين
   if (isAdmin) {
-    if (userMessage.includes('!طرد @')) {
-      handleKickByMention(event, userMessage, groupId);
+    if (userMessage.startsWith('!طرد ')) {
+      handleKickByName(event, userMessage, groupId);
       return;
     }
     
-    if (userMessage.includes('!تحذير @')) {
-      handleWarnByMention(event, userMessage);
+    if (userMessage === '!قائمة') {
+      showMembersList(event, groupId);
+      return;
+    }
+    
+    if (userMessage === '!تحديث') {
+      updateAllMembers(event, groupId);
       return;
     }
     
@@ -72,7 +106,6 @@ function handleSmartMessage(event) {
 
   if (hasBannedWord) {
     handleViolation(userId, userMessage, replyToken);
-    return;
   }
 
   // 📝 الردود العادية
@@ -81,53 +114,174 @@ function handleSmartMessage(event) {
   }
 }
 
-// 🚫 طرد بالمنشن
-function handleKickByMention(event, userMessage, groupId) {
-  // البحث عن المنشن في الرسالة
-  const mentionMatch = userMessage.match(/!طرد @(\S+)/);
+// 🚫 طرد بالاسم
+async function handleKickByName(event, userMessage, groupId) {
+  const nameMatch = userMessage.match(/!طرد\s+(.+)/);
   
-  if (!mentionMatch) {
+  if (!nameMatch) {
     client.replyMessage(event.replyToken, {
       type: 'text',
-      text: '❌ استخدم: !طرد @اسم_الشخص'
+      text: '❌ استخدم: !طرد اسم_الشخص\n\n📝 أمثلة:\n!طرد فيمتو\n!طرد أحمد'
     });
     return;
   }
 
-  const mentionedName = mentionMatch[1];
+  const targetName = nameMatch[1].trim().toLowerCase();
   
-  // للحصول على معلومات الأعضاء (نحتاج طريقة أخرى)
-  // حالياً سنستخدم طريقة بديلة
+  // تحديث قائمة الأعضاء أولاً
+  await updateAllMembers(event, groupId);
   
-  client.replyMessage(event.replyToken, {
-    type: 'text',
-    text: `🔍 جاري البحث عن "${mentionedName}" للطرد...\n\n⚠️ هذه الخاصية تحتاج تطوير إضافي`
-  });
+  const members = groupMembers.get(groupId);
+  if (!members || members.size === 0) {
+    client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: '❌ لا يوجد أعضاء مسجلين\nاكتب !تحديث ثم جرب مرة أخرى'
+    });
+    return;
+  }
+
+  // البحث عن الأعضاء المطابقين للاسم
+  const matchingMembers = [];
   
-  // بديل عملي: استخدام قائمة الأعضاء
-  handleAdvancedKick(event, mentionedName, groupId);
+  for (const [memberId, memberData] of members) {
+    if (memberData.displayName && 
+        memberData.displayName.toLowerCase().includes(targetName)) {
+      matchingMembers.push(memberData);
+    }
+  }
+
+  if (matchingMembers.length === 0) {
+    client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: `❌ لم أجد "${targetName}" في الأعضاء\nجرب !قائمة لرؤية الأسماء المتاحة`
+    });
+    return;
+  }
+
+  if (matchingMembers.length === 1) {
+    // إذا وجد عضو واحد فقط، تأكيد الطرد مباشرة
+    confirmKick(event, matchingMembers[0], groupId);
+  } else {
+    // إذا وجد أكثر من عضو، عرض قائمة للاختيار
+    showMultipleMembers(event, matchingMembers, groupId, targetName);
+  }
 }
 
-// 🚫 نظام طرد متقدم
-function handleAdvancedKick(event, targetName, groupId) {
-  // في LINE، لا يمكن الحصول على قائمة الأعضاء مباشرة
-  // لذلك نستخدم طريقة بديلة
+// 🔄 تحديث جميع الأعضاء
+async function updateAllMembers(event, groupId) {
+  try {
+    const memberIds = await client.getGroupMemberIds(groupId);
+    
+    if (!groupMembers.has(groupId)) {
+      groupMembers.set(groupId, new Map());
+    }
+    
+    const members = groupMembers.get(groupId);
+    
+    // تحديث كل عضو
+    for (const memberId of memberIds.memberIds) {
+      try {
+        const profile = await client.getGroupMemberProfile(groupId, memberId);
+        members.set(memberId, {
+          userId: memberId,
+          displayName: profile.displayName,
+          pictureUrl: profile.pictureUrl,
+          lastSeen: new Date()
+        });
+      } catch (error) {
+        console.log('⚠️ خطأ في الحصول على بروفايل:', memberId);
+      }
+    }
+    
+    client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: `✅ تم تحديث ${members.size} عضو`
+    });
+    
+  } catch (error) {
+    client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: '❌ لا يمكن تحديث قائمة الأعضاء - تأكد من صلاحيات البوت'
+    });
+  }
+}
+
+// 📋 عرض قائمة الأعضاء
+function showMembersList(event, groupId) {
+  const members = groupMembers.get(groupId);
   
+  if (!members || members.size === 0) {
+    client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: '❌ لا يوجد أعضاء مسجلين\nاكتب !تحديث أولاً'
+    });
+    return;
+  }
+
+  let membersText = `📋 الأعضاء (${members.size}):\n\n`;
+  let count = 0;
+  
+  for (const [userId, memberData] of members) {
+    if (count >= 15) {
+      membersText += `\n...و ${members.size - 15} أعضاء آخرين`;
+      break;
+    }
+    membersText += `${count + 1}. ${memberData.displayName || 'غير معروف'}\n`;
+    count++;
+  }
+  
+  membersText += `\n🔍 للطرد: !طرد اسم_الشخص`;
+
+  client.replyMessage(event.replyToken, {
+    type: 'text',
+    text: membersText
+  });
+}
+
+// 👥 عرض أعضاء متعددين
+function showMultipleMembers(event, members, groupId, searchName) {
+  const buttons = members.slice(0, 4).map((member, index) => ({
+    type: 'postback',
+    label: `طرد ${member.displayName}`,
+    data: `kick_${member.userId}`
+  }));
+
+  buttons.push({
+    type: 'message',
+    label: '❌ إلغاء',
+    text: '!إلغاء'
+  });
+
   const quickActions = {
     type: 'template',
-    altText: 'خيارات الطرد',
+    altText: 'اختر العضو للطرد',
     template: {
       type: 'buttons',
-      text: `🚫 طرد "${targetName}"\n\nاختر طريقة الطرد:`,
+      text: `🔍 وجدت ${members.length} عضو باسم "${searchName}"\nاختر العضو للطرد:`,
+      actions: buttons
+    }
+  };
+  
+  client.replyMessage(event.replyToken, quickActions);
+}
+
+// ✅ تأكيد الطرد
+function confirmKick(event, member, groupId) {
+  const quickActions = {
+    type: 'template',
+    altText: 'تأكيد الطرد',
+    template: {
+      type: 'buttons',
+      text: `🚫 تأكيد طرد:\n${member.displayName}\n\nهل أنت متأكد؟`,
       actions: [
         {
-          type: 'message',
-          label: '✅ تأكيد الطرد',
-          text: `!تأكيد_طرد ${targetName}`
+          type: 'postback',
+          label: '✅ نعم، طرد',
+          data: `kick_${member.userId}`
         },
         {
           type: 'message',
-          label: '❌ إلغاء',
+          label: '❌ لا، إلغاء',
           text: '!إلغاء'
         }
       ]
@@ -135,31 +289,6 @@ function handleAdvancedKick(event, targetName, groupId) {
   };
   
   client.replyMessage(event.replyToken, quickActions);
-}
-
-// ⚠️ تحذير بالمنشن
-function handleWarnByMention(event, userMessage) {
-  const mentionMatch = userMessage.match(/!تحذير @(\S+)/);
-  
-  if (!mentionMatch) {
-    client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: '❌ استخدم: !تحذير @اسم_الشخص'
-    });
-    return;
-  }
-
-  const mentionedName = mentionMatch[1];
-  
-  // نستخدم اسم مؤقت للتحذير
-  const tempUserId = `warn_${mentionedName}`;
-  const warnings = (userWarnings.get(tempUserId) || 0) + 1;
-  userWarnings.set(tempUserId, warnings);
-
-  client.replyMessage(event.replyToken, {
-    type: 'text',
-    text: `⚠️ تم تحذير "${mentionedName}" (${warnings}/${securitySettings.maxWarnings})`
-  });
 }
 
 // 🚫 أمر حظر كلمات
@@ -187,17 +316,19 @@ function handleBanCommand(event, userMessage) {
 function showAdminCommands(event) {
   client.replyMessage(event.replyToken, {
     type: 'text',
-    text: `👑 أوامر المشرفين (نظام المنشن):
+    text: `👑 أوامر المشرفين:
     
-!طرد @اسم - طرد عضو بالمنشن
-!تحذير @اسم - تحذير عضو بالمنشن  
+!طرد اسم - طرد عضو بالاسم
+!قائمة - عرض قائمة الأعضاء
+!تحديث - تحديث قائمة الأعضاء
 !حظر كلمة - حظر كلمة جديدة
 !الاوامر - عرض هذه القائمة
 
-📝 مثال:
-!طرد @فيمتو
-!تحذير @أحمد
-!حظر إعلان`
+📝 أمثلة:
+!طرد فيمتو
+!طرد أحمد
+!تحديث
+!حظر سوق`
   });
 }
 
@@ -242,18 +373,33 @@ function handleNormalReply(event, userMessage, isAdmin) {
   }
 }
 
-// معالجة الأزرار والردود
+// معالجة Postback للأزرار
 function handlePostback(event) {
-  if (event.postback.data === 'confirm_kick') {
-    // معالجة تأكيد الطرد
+  if (event.postback.data.startsWith('kick_')) {
+    const userId = event.postback.data.replace('kick_', '');
+    const groupId = event.source.groupId;
+    
+    client.kickGroupMember(groupId, userId)
+      .then(() => {
+        client.replyMessage(event.replyToken, {
+          type: 'text',
+          text: '✅ تم طرد العضو بنجاح'
+        });
+      })
+      .catch(error => {
+        client.replyMessage(event.replyToken, {
+          type: 'text',
+          text: '❌ فشل الطرد - تأكد من صلاحيات البوت'
+        });
+      });
   }
 }
 
 app.get('/', (req, res) => {
-  res.send('🤖 بوت الحماية بنظام المنشن يعمل!');
+  res.send('🤖 بوت الحماية بنظام الأسماء يعمل!');
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 بوت الحماية بنظام المنشن شغال على البورت ${PORT}`);
+  console.log(`🚀 بوت الحماية بنظام الأسماء شغال على البورت ${PORT}`);
 });
