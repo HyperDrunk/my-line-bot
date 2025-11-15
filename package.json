@@ -1,0 +1,15 @@
+{
+  "name": "line-bot-webhook",
+  "version": "1.0.0",
+  "description": "LINE Bot Webhook Server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
