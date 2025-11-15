@@ -10,16 +10,24 @@ const config = {
 
 const client = new line.Client(config);
 
+// 🔧 إعدادات بوت الحماية مع الصلاحيات
+const securitySettings = {
+  // المشرفون المسموح لهم باستخدام أوامر الطرد
+  admins: ['YOUR_USER_ID'], // ⬅️ ضع رابطك هنا
+  
+  // كلمات ممنوعة
+  bannedWords: ['سوق', 'بيع', 'شراء', 'إعلان', 'سبام'],
+  
+  // إعدادات الصمت
+  silentMode: true
+};
+
 app.use(express.json());
 
 // معالجة الويبهوك
 app.post('/webhook', (req, res) => {
-  console.log('🎯 تم استقبال طلب من LINE');
-  
-  // رد سريع لـ LINE
   res.status(200).send('OK');
   
-  // معالجة جميع الأحداث
   if (req.body && req.body.events) {
     req.body.events.forEach(event => {
       handleEvent(event);
@@ -29,68 +37,126 @@ app.post('/webhook', (req, res) => {
 
 // معالجة الأحداث
 function handleEvent(event) {
-  if (event.type !== 'message' || event.message.type !== 'text') {
-    return;
+  if (event.type === 'message' && event.message.type === 'text') {
+    handleSmartMessage(event);
   }
+}
 
+// 🧠 معالجة ذكية للرسائل
+function handleSmartMessage(event) {
   const userMessage = event.message.text.toLowerCase();
+  const userId = event.source.userId;
+  const groupId = event.source.groupId;
   const replyToken = event.replyToken;
   
-  console.log('💬 المستخدم قال:', userMessage);
-
+  // 🔍 التحقق إذا كان المستخدم مشرف
+  const isAdmin = securitySettings.admins.includes(userId);
+  
+  // 🛡️ أوامر الطرد (للمشرفين فقط)
+  if (isAdmin && userMessage.startsWith('!طرد')) {
+    handleKickCommand(event, userMessage, groupId);
+    return;
+  }
+  
+  if (isAdmin && userMessage.startsWith('!حظر')) {
+    handleBanCommand(event, userMessage, groupId);
+    return;
+  }
+  
+  // 📝 الردود العادية
+  const shouldReply = userMessage.includes('بوت') || 
+                     userMessage.includes('!قواعد') || 
+                     userMessage.includes('!حماية');
+  
+  if (!shouldReply) return;
+  
   let replyText = '';
-
-  // 📝 نظام الردود الذكي
-  if (userMessage.includes('مرحبا') || userMessage.includes('اهلا') || userMessage.includes('السلام')) {
-    replyText = 'مرحبا بك! 😊 كيف يمكنني مساعدتك؟';
-  } 
-  else if (userMessage.includes('الوقت')) {
-    replyText = `⏰ الوقت الحالي: ${new Date().toLocaleTimeString('ar-SA')}`;
-  } 
-  else if (userMessage.includes('التاريخ')) {
-    replyText = `📅 التاريخ: ${new Date().toLocaleDateString('ar-SA')}`;
-  } 
-  else if (userMessage.includes('اليوم')) {
-    replyText = `📆 اليوم: ${new Date().toLocaleDateString('ar-SA', { weekday: 'long' })}`;
+  
+  if (userMessage.includes('بوت')) {
+    if (isAdmin) {
+      replyText = '🛡️ أنا بوت الحماية - أنت مشرف\nالأوامر: !طرد @شخص | !حظر @شخص';
+    } else {
+      replyText = '🛡️ أنا بوت الحماية الصامت';
+    }
   }
-  else if (userMessage.includes('من انت') || userMessage.includes('اسمك')) {
-    replyText = 'أنا بوتك المساعد الذكي! 🤖\nيمكنني إخبارك بالوقت والتاريخ والرد على استفساراتك.';
-  } 
-  else if (userMessage.includes('مساعدة') || userMessage.includes('الاوامر')) {
-    replyText = `🆘 *الأوامر المتاحة:*
-⏰ "الوقت" - معرفة الوقت الحالي
-📅 "التاريخ" - معرفة التاريخ
-📆 "اليوم" - معرفة اليوم
-🤖 "من انت" - تعريف البوت
-🙏 "شكرا" - رد المجاملة`;
-  } 
-  else if (userMessage.includes('شكرا') || userMessage.includes('ممتاز')) {
-    replyText = 'العفو! 😇 سعيد لخدمتك';
-  } 
-  else {
-    replyText = `أفهم أنك تقول: "${event.message.text}"\n💭 جرب "مساعدة" لرؤية الأوامر المتاحة.`;
+  else if (userMessage.includes('!قواعد')) {
+    replyText = `📋 *قواعد المجموعة*:
+1. ✅ الالتزام بالأدب والاحترام
+2. ❌ ممنوع البيع أو الإعلان
+3. ❌ ممنوع المحتوى غير اللائق`;
   }
+  else if (userMessage.includes('!حماية')) {
+    replyText = '🛡️ نظام الحماية نشط - البوت في الوضع الصامت';
+  }
+  
+  if (replyText) {
+    client.replyMessage(replyToken, {
+      type: 'text',
+      text: replyText
+    });
+  }
+}
 
-  // إرسال الرد
-  client.replyMessage(replyToken, {
+// 🚫 أمر طرد عضو
+function handleKickCommand(event, userMessage, groupId) {
+  // استخراج رابط العضو من الرسالة
+  const mentionMatch = userMessage.match(/@(\S+)/);
+  
+  if (!mentionMatch) {
+    client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: '❌ استخدم: !طرد @رابط_العضو'
+    });
+    return;
+  }
+  
+  const targetUserId = mentionMatch[1];
+  
+  // طرد العضو من المجموعة
+  client.kickGroupMember(groupId, targetUserId)
+    .then(() => {
+      console.log(`✅ تم طرد العضو: ${targetUserId}`);
+      client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: `✅ تم طرد العضو بنجاح`
+      });
+    })
+    .catch(error => {
+      console.error('❌ خطأ في الطرد:', error);
+      client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: '❌ لم استطع طرد العضو - تأكد من الصلاحيات'
+      });
+    });
+}
+
+// ⚠️ أمر حظر كلمات
+function handleBanCommand(event, userMessage, groupId) {
+  const wordMatch = userMessage.match(/!حظر\s+(\S+)/);
+  
+  if (!wordMatch) {
+    client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: '❌ استخدم: !حظر كلمة'
+    });
+    return;
+  }
+  
+  const bannedWord = wordMatch[1];
+  securitySettings.bannedWords.push(bannedWord);
+  
+  client.replyMessage(event.replyToken, {
     type: 'text',
-    text: replyText
-  })
-  .then(() => {
-    console.log('✅ تم إرسال الرد بنجاح');
-  })
-  .catch(error => {
-    console.error('❌ خطأ في الإرسال:', error);
+    text: `✅ تم حظر الكلمة: "${bannedWord}"`
   });
 }
 
-// صفحة رئيسية للاختبار
+// صفحة رئيسية
 app.get('/', (req, res) => {
-  res.send('🤖 البوت يعمل! أرسل رسالة على LINE لتجربته.');
+  res.send('🤖 بوت الحماية مع صلاحيات الطرد يعمل!');
 });
 
-// تشغيل الخادم
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 الخادم شغال على البورت ${PORT}`);
+  console.log(`🚀 بوت الحماية المتقدم شغال على البورت ${PORT}`);
 });
