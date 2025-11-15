@@ -3,7 +3,7 @@ const line = require("@line/bot-sdk");
 const app = express();
 
 const config = {
-  channelAccessToken: 'bGSRA/2mmH3ls9vhbhQ/fzCd0eS/9zXi67tnyTzdnEPG9eFfOz/dmnru4kCGoAqa1l1SKH3Pa56h0O40pQivTBiOVfTiIqYKc7fYL4cTMcuislx0OGqYFFmVuu4N4TfP6yK835erCoffxOZrQrDr4QdB04t89/1O/w1cDnyilFU=',
+  channelAccessToken: 'bGSRA/2mmH3ls9vhbhQ/fzCd0eS/9zXi67tnyTzdnEPG9eFfOz/dmnru4kCGoAqa1l1SKH3Pa56h0O40pQivTBiOVfTiIqYKc7fYL4cTMcuislx0OGqYFFmVuu4N4Tf6yK835erCoffxOZrQrDr4QdB04t89/1O/w1cDnyilFU=',
   channelSecret: '73dcd76ba4de9810f67b6fffadcf8ef5'
 };
 
@@ -12,34 +12,39 @@ const client = new line.Client(config);
 // 🔧 إعدادات البوت الكاملة
 const securitySettings = {
   admins: ['U1f51a7685b725c6769f662c16ef3069a'],
-  bannedWords: ['سوق', 'بيع', 'شراء', 'إعلان', 'سبام', 'spam', 'منتج', 'عرض'],
+  
+  // الكلمات الممنوعة
+  bannedWords: ['سوق', 'بيع', 'شراء', 'إعلان', 'سبام', 'spam', 'منتج', 'عرض خاص'],
+  
+  // إعدادات الحماية
   autoKick: true,
   maxWarnings: 3,
+  autoMute: true,
+  
+  // القوانين
   rules: `📋 *قوانين المجموعة*:
   
 1. ✅ الالتزام بالأدب والاحترام
 2. ❌ ممنوع الإعلان أو البيع
 3. ❌ ممنوع المحتوى غير اللائق
-4. ❌ ممنوع السبام
-5. ⚠️ 3 مخالفات = طرد تلقائي
+4. ✅ المشاركة البناءة مرحب بها
+5. ⚠️ 3 مخالفات = طرد تلقائي`,
 
-🎯 المجموعة للتواصل الهادف والمناقشات البناءة`
+  // الردود التلقائية
+  autoReplies: {
+    'اتشو': 'يرحمك الله يا قلبي 🤧',
+    'الله يرحمك': 'ويغفر لك ويرحمنا أجمعين 🤲',
+    'الحمدلله': 'الحمدلله دائماً وأبداً 🙏',
+    'ما شاء الله': 'ما شاء الله تبارك الرحمن 🌟',
+    'سبحان الله': 'سبحان الله وبحمده سبحان الله العظيم 🌿'
+  }
 };
 
 // تخزين البيانات
 const userWarnings = new Map();
 const mutedUsers = new Map();
 const groupMembers = new Map();
-const autoReplies = new Map();
-
-// 🔥 إعداد الردود التلقائية
-autoReplies.set('اتشو', 'يرحمك الله يا قلبي 🤲');
-autoReplies.set('عطس', 'يرحمك الله 🙏');
-autoReplies.set('الحمدلله', 'الله يبارك فيك 🌟');
-autoReplies.set('صباح الخير', 'صباح النور 🌞');
-autoReplies.set('مساء الخير', 'مساء الأنوار 🌙');
-autoReplies.set('اهلا', 'أهلاً وسهلاً 🌹');
-autoReplies.set('مرحبا', 'مرحبا بك 😊');
+const bannedWords = new Set(securitySettings.bannedWords);
 
 app.use(express.json());
 
@@ -59,6 +64,10 @@ function handleEvent(event) {
 
   if (event.type === 'message' && event.message.type === 'text') {
     handleSmartMessage(event);
+  }
+
+  if (event.type === 'memberJoined') {
+    handleMemberJoin(event);
   }
 }
 
@@ -83,6 +92,16 @@ async function updateMemberProfile(userId, groupId) {
   }
 }
 
+// 👋 ترحيب بالأعضاء الجدد
+function handleMemberJoin(event) {
+  const groupId = event.source.groupId;
+  
+  client.pushMessage(groupId, {
+    type: 'text',
+    text: `🎉 أهلاً وسهلاً بالعضو الجديد!\n\n${securitySettings.rules}\n\n💡 اكتب "قوانين" لرؤية القوانين`
+  });
+}
+
 async function handleSmartMessage(event) {
   const userMessage = event.message.text;
   const userId = event.source.userId;
@@ -90,18 +109,7 @@ async function handleSmartMessage(event) {
   const replyToken = event.replyToken;
   const isAdmin = securitySettings.admins.includes(userId);
 
-  // 🔥 الردود التلقائية أولاً
-  for (const [keyword, response] of autoReplies) {
-    if (userMessage.includes(keyword)) {
-      client.replyMessage(replyToken, {
-        type: 'text',
-        text: response
-      });
-      break;
-    }
-  }
-
-  // 🔍 إذا كان المستخدم مكتوماً
+  // 🔥 إذا كان المستخدم مكتوماً، نتجاهل رسالته
   if (isUserMuted(userId, groupId)) {
     return;
   }
@@ -124,31 +132,21 @@ async function handleSmartMessage(event) {
     }
     
     if (userMessage.startsWith('!حظر ')) {
-      handleBanCommand(event, userMessage);
+      handleBanWordCommand(event, userMessage);
       return;
     }
     
-    if (userMessage.startsWith('!فك_حظر ')) {
-      handleUnbanCommand(event, userMessage);
-      return;
-    }
-    
-    if (userMessage === '!القوانين') {
-      showRules(event);
-      return;
-    }
-    
-    if (userMessage === '!قائمة_الاعضاء') {
+    if (userMessage === '!قائمة') {
       showMembersList(event, groupId);
       return;
     }
     
-    if (userMessage === '!قائمة_المكتومين') {
+    if (userMessage === '!المكتومين') {
       showMutedUsers(event, groupId);
       return;
     }
     
-    if (userMessage === '!قائمة_المحظورين') {
+    if (userMessage === '!الكلمات_الممنوعة') {
       showBannedWords(event);
       return;
     }
@@ -159,36 +157,65 @@ async function handleSmartMessage(event) {
     }
     
     if (userMessage === '!الاوامر') {
-      showAllCommands(event, isAdmin);
+      showAdminCommands(event);
       return;
     }
-    
-    if (userMessage.startsWith('!اضافة_رد ')) {
-      handleAddAutoReply(event, userMessage);
-      return;
-    }
-  }
-
-  // 🔍 كشف الكلمات الممنوعة
-  const hasBannedWord = securitySettings.bannedWords.some(word => 
-    userMessage.toLowerCase().includes(word.toLowerCase())
-  );
-
-  if (hasBannedWord) {
-    handleViolation(userId, userMessage, replyToken, groupId);
-    return;
   }
 
   // 📝 أوامر عامة للجميع
-  if (userMessage === '!القوانين') {
+  if (userMessage === 'قوانين' || userMessage === 'القوانين') {
     showRules(event);
     return;
   }
   
-  if (userMessage === '!الاوامر') {
-    showUserCommands(event);
+  if (userMessage === 'مساعده' || userMessage === 'مساعدة') {
+    showHelp(event, isAdmin);
     return;
   }
+  
+  if (userMessage === 'بوت' || userMessage === 'البوت') {
+    showBotInfo(event, isAdmin);
+    return;
+  }
+
+  // 💬 الردود التلقائية
+  const autoReply = checkAutoReplies(userMessage);
+  if (autoReply) {
+    client.replyMessage(replyToken, {
+      type: 'text',
+      text: autoReply
+    });
+    return;
+  }
+
+  // 🔍 كشف الكلمات الممنوعة
+  const hasBannedWord = checkBannedWords(userMessage);
+  if (hasBannedWord) {
+    handleViolation(userId, userMessage, replyToken, groupId);
+    return;
+  }
+}
+
+// 💬 التحقق من الردود التلقائية
+function checkAutoReplies(message) {
+  const lowerMessage = message.toLowerCase();
+  for (const [keyword, response] of Object.entries(securitySettings.autoReplies)) {
+    if (lowerMessage.includes(keyword.toLowerCase())) {
+      return response;
+    }
+  }
+  return null;
+}
+
+// 🔍 التحقق من الكلمات الممنوعة
+function checkBannedWords(message) {
+  const lowerMessage = message.toLowerCase();
+  for (const word of bannedWords) {
+    if (lowerMessage.includes(word.toLowerCase())) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // 🚫 طرد عضو
@@ -204,6 +231,7 @@ async function handleKickCommand(event, userMessage, groupId) {
   }
 
   const targetName = nameMatch[1].trim().toLowerCase();
+  
   const members = groupMembers.get(groupId);
   
   if (!members) {
@@ -267,6 +295,14 @@ async function handleMuteCommand(event, userMessage, groupId) {
   const targetName = nameMatch[1].trim().toLowerCase();
   const members = groupMembers.get(groupId);
   
+  if (!members) {
+    client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: '❌ لا يوجد أعضاء مسجلين'
+    });
+    return;
+  }
+
   let foundMember = null;
   for (const [memberId, memberData] of members) {
     if (memberData.displayName && 
@@ -279,7 +315,7 @@ async function handleMuteCommand(event, userMessage, groupId) {
   if (!foundMember) {
     client.replyMessage(event.replyToken, {
       type: 'text',
-      text: `❌ لم أجد "${targetName}"`
+      text: `❌ لم أجد "${targetName}" في الأعضاء`
     });
     return;
   }
@@ -323,8 +359,8 @@ async function handleUnmuteCommand(event, userMessage, groupId) {
   });
 }
 
-// 🚫 حظر كلمة
-function handleBanCommand(event, userMessage) {
+// 🚫 حظر كلمة جديدة
+function handleBanWordCommand(event, userMessage) {
   const wordMatch = userMessage.match(/!حظر\s+(\S+)/);
   
   if (!wordMatch) {
@@ -336,6 +372,8 @@ function handleBanCommand(event, userMessage) {
   }
 
   const bannedWord = wordMatch[1];
+  bannedWords.add(bannedWord);
+  
   securitySettings.bannedWords.push(bannedWord);
 
   client.replyMessage(event.replyToken, {
@@ -344,54 +382,77 @@ function handleBanCommand(event, userMessage) {
   });
 }
 
-// ✅ فك حظر كلمة
-function handleUnbanCommand(event, userMessage) {
-  const wordMatch = userMessage.match(/!فك_حظر\s+(\S+)/);
-  
-  if (!wordMatch) {
-    client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: '❌ استخدم: !فك_حظر كلمة'
-    });
-    return;
+// 🔇 نظام الكتم
+function muteUser(userId, groupId, displayName) {
+  if (!mutedUsers.has(groupId)) {
+    mutedUsers.set(groupId, new Map());
   }
+  
+  const groupMuted = mutedUsers.get(groupId);
+  groupMuted.set(userId, {
+    userId: userId,
+    displayName: displayName,
+    mutedAt: new Date()
+  });
+}
 
-  const unbannedWord = wordMatch[1];
-  const index = securitySettings.bannedWords.indexOf(unbannedWord);
-  if (index > -1) {
-    securitySettings.bannedWords.splice(index, 1);
-    client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: `✅ تم فك حظر الكلمة: "${unbannedWord}"`
-    });
-  } else {
-    client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: `❌ "${unbannedWord}" غير محظورة`
-    });
+function unmuteUser(userId, groupId) {
+  if (mutedUsers.has(groupId)) {
+    mutedUsers.get(groupId).delete(userId);
   }
 }
 
-// ➕ إضافة رد تلقائي
-function handleAddAutoReply(event, userMessage) {
-  const replyMatch = userMessage.match(/!اضافة_رد\s+(\S+)\s+(.+)/);
+function isUserMuted(userId, groupId) {
+  return mutedUsers.has(groupId) && mutedUsers.get(groupId).has(userId);
+}
+
+function findMutedUserByName(targetName, groupId) {
+  if (!mutedUsers.has(groupId)) return null;
   
-  if (!replyMatch) {
-    client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: '❌ استخدم: !اضافة_رد كلمة الرد'
-    });
-    return;
+  const groupMuted = mutedUsers.get(groupId);
+  for (const [userId, muteData] of groupMuted) {
+    if (muteData.displayName && 
+        muteData.displayName.toLowerCase().includes(targetName)) {
+      return muteData;
+    }
+  }
+  return null;
+}
+
+// ⚠️ معالجة المخالفات
+function handleViolation(userId, message, replyToken, groupId) {
+  const warnings = (userWarnings.get(userId) || 0) + 1;
+  userWarnings.set(userId, warnings);
+
+  let responseText = `⚠️ تحذير ${warnings}/${securitySettings.maxWarnings}: كلمة ممنوعة!`;
+  
+  if (warnings >= securitySettings.maxWarnings) {
+    const member = groupMembers.get(groupId)?.get(userId);
+    if (member) {
+      responseText = `🚫 ${member.displayName} - تم تجاوز الحد المسموح!`;
+      
+      // محاولة الطرد التلقائي
+      client.kickGroupMember(groupId, userId)
+        .then(() => {
+          client.pushMessage(groupId, {
+            type: 'text',
+            text: `🚫 تم طرد ${member.displayName} تلقائياً بعد ${warnings} مخالفات`
+          });
+        })
+        .catch(error => {
+          // إذا فشل الطرد، نستخدم الكتم
+          muteUser(userId, groupId, member.displayName);
+          client.pushMessage(groupId, {
+            type: 'text',
+            text: `🔇 تم كتم ${member.displayName} تلقائياً بعد ${warnings} مخالفات`
+          });
+        });
+    }
   }
 
-  const keyword = replyMatch[1];
-  const response = replyMatch[2];
-  
-  autoReplies.set(keyword, response);
-  
-  client.replyMessage(event.replyToken, {
+  client.replyMessage(replyToken, {
     type: 'text',
-    text: `✅ تم إضافة رد تلقائي:\n"${keyword}" → "${response}"`
+    text: responseText
   });
 }
 
@@ -403,7 +464,58 @@ function showRules(event) {
   });
 }
 
-// 👥 عرض قائمة الأعضاء
+// 📞 عرض المساعدة
+function showHelp(event, isAdmin) {
+  let helpText = `🛡️ *بوت حماية المجموعات*\n\n`;
+  
+  if (isAdmin) {
+    helpText += `👑 *أوامر المشرفين:*\n`;
+    helpText += `!طرد اسم - طرد عضو\n`;
+    helpText += `!كتم اسم - كتم عضو\n`;
+    helpText += `!فك_كتم اسم - فك كتم\n`;
+    helpText += `!حظر كلمة - حظر كلمة\n`;
+    helpText += `!قائمة - عرض الأعضاء\n`;
+    helpText += `!المكتومين - عرض المكتومين\n`;
+    helpText += `!الكلمات_الممنوعة - عرض الكلمات\n`;
+    helpText += `!الاوامر - عرض الأوامر\n\n`;
+  }
+  
+  helpText += `📝 *أوامر عامة:*\n`;
+  helpText += `قوانين - عرض القوانين\n`;
+  helpText += `مساعدة - عرض هذه الرسالة\n`;
+  helpText += `بوت - معلومات البوت\n\n`;
+  helpText += `💬 *ردود تلقائية:*\n`;
+  helpText += `اتشو ➝ يرحمك الله يا قلبي\n`;
+  helpText += `الحمدلله ➝ الحمدلله دائماً\n`;
+  helpText += `ما شاء الله ➝ ما شاء الله تبارك الرحمن`;
+
+  client.replyMessage(event.replyToken, {
+    type: 'text',
+    text: helpText
+  });
+}
+
+// 🤖 معلومات البوت
+function showBotInfo(event, isAdmin) {
+  let infoText = `🤖 *بوت الحماية الذكي*\n\n`;
+  infoText += `🛡️ نظام حماية متكامل\n`;
+  infoText += `🚫 كشف الكلمات الممنوعة\n`;
+  infoText += `🔇 نظام كتم تلقائي\n`;
+  infoText += `💬 ردود ذكية\n\n`;
+  
+  if (isAdmin) {
+    infoText += `🎯 أنت مشرف - اكتب "مساعدة" للأوامر`;
+  } else {
+    infoText += `📝 اكتب "قوانين" للاطلاع على القوانين`;
+  }
+
+  client.replyMessage(event.replyToken, {
+    type: 'text',
+    text: infoText
+  });
+}
+
+// 📜 عرض قائمة الأعضاء
 function showMembersList(event, groupId) {
   const members = groupMembers.get(groupId);
   
@@ -419,11 +531,14 @@ function showMembersList(event, groupId) {
   let count = 0;
   
   for (const [userId, memberData] of members) {
-    if (count >= 10) break;
+    if (count >= 10) {
+      membersText += `\n...و ${members.size - 10} أعضاء آخرين`;
+      break;
+    }
     const warnings = userWarnings.get(userId) || 0;
     const muteStatus = isUserMuted(userId, groupId) ? ' 🔇' : '';
-    const warnStatus = warnings > 0 ? ` ⚠️${warnings}` : '';
-    membersText += `${count + 1}. ${memberData.displayName}${muteStatus}${warnStatus}\n`;
+    const warnStatus = warnings > 0 ? ` ⚠️${warnings}` : ' ✅';
+    membersText += `${count + 1}. ${memberData.displayName}${warnStatus}${muteStatus}\n`;
     count++;
   }
 
@@ -458,61 +573,70 @@ function showMutedUsers(event, groupId) {
   });
 }
 
-// 🚫 عرض الكلمات المحظورة
+// 🚫 عرض الكلمات الممنوعة
 function showBannedWords(event) {
+  const wordsText = `🚫 الكلمات الممنوعة:\n\n${Array.from(bannedWords).join('\n')}`;
+  
   client.replyMessage(event.replyToken, {
     type: 'text',
-    text: `🚫 الكلمات المحظورة:\n${securitySettings.bannedWords.join(', ')}`
+    text: wordsText
   });
 }
 
-// 🛡️ تفعيل الحماية
+// 🔍 التحقق من صلاحيات البوت
 async function checkBotAdminStatus(event, groupId) {
   try {
-    await client.getGroupSummary(groupId);
+    const groupSummary = await client.getGroupSummary(groupId);
+    
     client.replyMessage(event.replyToken, {
       type: 'text',
-      text: `✅ البوت متصل بالمجموعة\n\n💡 للطرد يجب أن يكون البوت مشرفاً`
+      text: `🔍 حالة البوت:\n\n✅ متصل بالمجموعة: ${groupSummary.groupName}\n\n💡 لتفعيل الطرد:\n- البوت يجب أن يكون مشرفاً\n- اطلب من مالك المجموعة ترقيته`
     });
+    
   } catch (error) {
     client.replyMessage(event.replyToken, {
       type: 'text',
-      text: '❌ لا يمكن الوصول للمجموعة'
+      text: '❌ لا يمكن الوصول لإعدادات المجموعة'
     });
   }
 }
 
-// 📜 عرض جميع الأوامر
-function showAllCommands(event, isAdmin) {
-  let commandsText = `🎯 *أوامر البوت:*\n\n`;
-  
-  commandsText += `📋 *أوامر عامة:*\n`;
-  commandsText += `!القوانين - عرض قوانين المجموعة\n`;
-  commandsText += `!الاوامر - عرض هذه القائمة\n\n`;
-  
-  if (isAdmin) {
-    commandsText += `👑 *أوامر المشرفين:*\n`;
-    commandsText += `!طرد اسم - طرد عضو\n`;
-    commandsText += `!كتم اسم - كتم عضو\n`;
-    commandsText += `!فك_كتم اسم - فك كتم عضو\n`;
-    commandsText += `!حظر كلمة - حظر كلمة\n`;
-    commandsText += `!فك_حظر كلمة - فك حظر كلمة\n`;
-    commandsText += `!اضافة_رد كلمة رد - إضافة رد تلقائي\n`;
-    commandsText += `!قائمة_الاعضاء - عرض الأعضاء\n`;
-    commandsText += `!قائمة_المكتومين - عرض المكتومين\n`;
-    commandsText += `!قائمة_المحظورين - عرض الكلمات المحظورة\n`;
-    commandsText += `!تفعيل_الحماية - التحقق من الصلاحيات\n\n`;
-  }
-  
-  commandsText += `🤖 *ردود تلقائية:*\n`;
-  commandsText += `اتشو, عطس, الحمدلله, مرحبا, صباح الخير, مساء الخير`;
-
+// 📋 عرض أوامر المشرفين
+function showAdminCommands(event) {
   client.replyMessage(event.replyToken, {
     type: 'text',
-    text: commandsText
+    text: `👑 *أوامر المشرفين الكاملة:*
+
+🚫 *إدارة الأعضاء:*
+!طرد اسم - طرد عضو
+!كتم اسم - كتم عضو  
+!فك_كتم اسم - فك كتم عضو
+
+📝 *إدارة المحتوى:*
+!حظر كلمة - حظر كلمة جديدة
+
+📊 *المعلومات:*
+!قائمة - عرض قائمة الأعضاء
+!المكتومين - عرض المكتومين
+!الكلمات_الممنوعة - عرض الكلمات المحظورة
+!تفعيل_الحماية - التحقق من الصلاحيات
+
+❓ *المساعدة:*
+!الاوامر - عرض هذه القائمة
+
+📝 *أمثلة:*
+!طرد أحمد
+!كتم محمد
+!حظر سوق
+!قائمة`
   });
 }
 
-// 📝 أوامر المستخدمين العاديين
-function showUserCommands(event) {
-  const commandsText = `🎯 *أوامر متاحة للجميع:*\n\n
+app.get('/', (req, res) => {
+  res.send('🤖 بوت الحماية المتكامل شغال!');
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 بوت الحماية المتكامل شغال على البورت ${PORT}`);
+});
