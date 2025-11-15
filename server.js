@@ -12,32 +12,81 @@ const client = new line.Client(config);
 
 app.use(express.json());
 
-// ويبهوك بسيط
+// معالجة الويبهوك
 app.post('/webhook', (req, res) => {
-  console.log('🎯 وصلت رسالة جديدة!');
+  console.log('🎯 تم استقبال طلب من LINE');
   
-  // رد سريع
+  // رد سريع لـ LINE
   res.status(200).send('OK');
   
-  // معالجة الرسائل
+  // معالجة جميع الأحداث
   if (req.body && req.body.events) {
     req.body.events.forEach(event => {
-      if (event.type === 'message' && event.message.text) {
-        console.log('💬 المستخدم قال:', event.message.text);
-        
-        // رد تلقائي
-        client.replyMessage(event.replyToken, {
-          type: 'text',
-          text: 'شكراً على رسالتك: ' + event.message.text
-        });
-      }
+      handleEvent(event);
     });
   }
 });
 
-// صفحة رئيسية
+// معالجة الأحداث
+function handleEvent(event) {
+  if (event.type !== 'message' || event.message.type !== 'text') {
+    return;
+  }
+
+  const userMessage = event.message.text.toLowerCase();
+  const replyToken = event.replyToken;
+  
+  console.log('💬 المستخدم قال:', userMessage);
+
+  let replyText = '';
+
+  // 📝 نظام الردود الذكي
+  if (userMessage.includes('مرحبا') || userMessage.includes('اهلا') || userMessage.includes('السلام')) {
+    replyText = 'مرحبا بك! 😊 كيف يمكنني مساعدتك؟';
+  } 
+  else if (userMessage.includes('الوقت')) {
+    replyText = `⏰ الوقت الحالي: ${new Date().toLocaleTimeString('ar-SA')}`;
+  } 
+  else if (userMessage.includes('التاريخ')) {
+    replyText = `📅 التاريخ: ${new Date().toLocaleDateString('ar-SA')}`;
+  } 
+  else if (userMessage.includes('اليوم')) {
+    replyText = `📆 اليوم: ${new Date().toLocaleDateString('ar-SA', { weekday: 'long' })}`;
+  }
+  else if (userMessage.includes('من انت') || userMessage.includes('اسمك')) {
+    replyText = 'أنا بوتك المساعد الذكي! 🤖\nيمكنني إخبارك بالوقت والتاريخ والرد على استفساراتك.';
+  } 
+  else if (userMessage.includes('مساعدة') || userMessage.includes('الاوامر')) {
+    replyText = `🆘 *الأوامر المتاحة:*
+⏰ "الوقت" - معرفة الوقت الحالي
+📅 "التاريخ" - معرفة التاريخ
+📆 "اليوم" - معرفة اليوم
+🤖 "من انت" - تعريف البوت
+🙏 "شكرا" - رد المجاملة`;
+  } 
+  else if (userMessage.includes('شكرا') || userMessage.includes('ممتاز')) {
+    replyText = 'العفو! 😇 سعيد لخدمتك';
+  } 
+  else {
+    replyText = `أفهم أنك تقول: "${event.message.text}"\n💭 جرب "مساعدة" لرؤية الأوامر المتاحة.`;
+  }
+
+  // إرسال الرد
+  client.replyMessage(replyToken, {
+    type: 'text',
+    text: replyText
+  })
+  .then(() => {
+    console.log('✅ تم إرسال الرد بنجاح');
+  })
+  .catch(error => {
+    console.error('❌ خطأ في الإرسال:', error);
+  });
+}
+
+// صفحة رئيسية للاختبار
 app.get('/', (req, res) => {
-  res.send('🤖 البوت يعمل!');
+  res.send('🤖 البوت يعمل! أرسل رسالة على LINE لتجربته.');
 });
 
 // تشغيل الخادم
